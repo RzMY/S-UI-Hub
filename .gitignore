@@ -1,0 +1,15 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+.env
+.env.*
+!.env.example
+*.log
+test-results/
+playwright-report/
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+docs/

@@ -1,0 +1,100 @@
+name: Build desktop packages
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis,msi
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,rpm,appimage
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            bundles: deb,rpm,appimage
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libdbus-1-dev xdg-utils
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - name: Check tag version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: node -e 'const p=require("./package.json"); if(process.env.GITHUB_REF_NAME !== `v${p.version}`) process.exit(1)'
+      - name: Build installer
+        run: npm run tauri -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
+      - name: Collect installers and checksums
+        shell: python
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          import hashlib, os, pathlib, shutil
+          root = pathlib.Path('src-tauri/target') / os.environ['TARGET'] / 'release/bundle'
+          output = pathlib.Path('release-artifacts')
+          output.mkdir()
+          for file in root.rglob('*'):
+              if file.is_file() and file.suffix.lower() in {'.exe', '.msi', '.dmg', '.deb', '.rpm', '.appimage'}:
+                  shutil.copy2(file, output / file.name)
+          files = sorted(output.iterdir())
+          if not files:
+              raise SystemExit('No installers were produced')
+          sums = '\n'.join(f'{hashlib.sha256(f.read_bytes()).hexdigest()}  {f.name}' for f in files)
+          (output / ('SHA256SUMS-' + os.environ['TARGET'] + '.txt')).write_text(sums + '\n')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s-ui-hub-${{ matrix.target }}
+          path: release-artifacts/*
+          if-no-files-found: error
+  draft-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: s-ui-hub-*
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: artifacts/*
