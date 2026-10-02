@@ -943,7 +943,9 @@ export default function App() {
                     >
                       {session?.status === 'connected' ? (
                         <div className="panel-loading">
-                          <LoaderCircle className="spin" size={24} />
+                          {/* A native child webview covers this placeholder. An
+                              animated spinner keeps the host rendering forever. */}
+                          <LayoutDashboard size={24} />
                           <span>{t('正在打开面板')}</span>
                         </div>
                       ) : (

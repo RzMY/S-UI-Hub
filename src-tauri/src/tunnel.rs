@@ -1,20 +1,53 @@
 use crate::model::{AuthType, HubError, Result, Server};
+use crate::ssh_transport::SshTransport;
 use russh::{
     client,
     keys::{HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate},
-    Disconnect,
 };
 use std::{
+    ops::Deref,
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tokio::{net::TcpListener, task::JoinSet};
-use tokio_util::sync::CancellationToken;
+use tokio::{
+    net::{TcpListener, TcpStream},
+    task::JoinSet,
+};
+use tokio_util::sync::{CancellationToken, DropGuard};
 use zeroize::Zeroizing;
 
 pub struct HostVerifier {
     pub expected: Option<String>,
     pub observed: Arc<Mutex<Option<String>>>,
+    pub closed: CancellationToken,
+}
+
+impl Drop for HostVerifier {
+    fn drop(&mut self) {
+        self.closed.cancel();
+    }
+}
+
+pub struct SshConnection {
+    handle: Arc<client::Handle<HostVerifier>>,
+    cancel: CancellationToken,
+    closed: CancellationToken,
+    _guard: DropGuard,
+}
+
+impl Deref for SshConnection {
+    type Target = client::Handle<HostVerifier>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.handle
+    }
+}
+
+impl SshConnection {
+    pub async fn close(&self) {
+        self.cancel.cancel();
+        self.closed.cancelled().await;
+    }
 }
 
 impl client::Handler for HostVerifier {
@@ -30,7 +63,7 @@ impl client::Handler for HostVerifier {
 }
 
 pub struct Established {
-    pub handle: Arc<client::Handle<HostVerifier>>,
+    pub handle: SshConnection,
     pub listener: TcpListener,
     pub url: String,
 }
@@ -43,11 +76,15 @@ pub async fn establish(server: &Server, secret: Option<Zeroizing<String>>) -> Re
 pub async fn authenticate(
     server: &Server,
     secret: Option<Zeroizing<String>>,
-) -> Result<client::Handle<HostVerifier>> {
+) -> Result<SshConnection> {
     let observed = Arc::new(Mutex::new(None));
+    let cancel = CancellationToken::new();
+    let guard = cancel.clone().drop_guard();
+    let closed = CancellationToken::new();
     let verifier = HostVerifier {
         expected: server.host_fingerprint.clone(),
         observed: observed.clone(),
+        closed: closed.clone(),
     };
     let config = client::Config {
         keepalive_interval: Some(Duration::from_secs(15)),
@@ -55,14 +92,16 @@ pub async fn authenticate(
         nodelay: true,
         ..Default::default()
     };
-    let result = tokio::time::timeout(
-        Duration::from_secs(20),
-        client::connect(
+    let result = tokio::time::timeout(Duration::from_secs(20), async {
+        let socket = TcpStream::connect((server.host.as_str(), server.port)).await?;
+        socket.set_nodelay(true)?;
+        client::connect_stream(
             Arc::new(config),
-            (server.host.as_str(), server.port),
+            SshTransport::new(socket, cancel.clone()),
             verifier,
-        ),
-    )
+        )
+        .await
+    })
     .await;
     let mut handle = match result {
         Ok(Ok(handle)) => handle,
@@ -147,10 +186,15 @@ pub async fn authenticate(
             "SSH 身份验证失败，请检查用户名和凭证",
         ));
     }
-    Ok(handle)
+    Ok(SshConnection {
+        handle: Arc::new(handle),
+        cancel,
+        closed,
+        _guard: guard,
+    })
 }
 
-async fn forward(server: &Server, handle: client::Handle<HostVerifier>) -> Result<Established> {
+async fn forward(server: &Server, handle: SshConnection) -> Result<Established> {
     let channel = tokio::time::timeout(
         Duration::from_secs(10),
         handle.channel_open_direct_tcpip(
@@ -182,7 +226,7 @@ async fn forward(server: &Server, handle: client::Handle<HostVerifier>) -> Resul
         server.panel_scheme, port, server.panel_path
     );
     Ok(Established {
-        handle: Arc::new(handle),
+        handle,
         listener,
         url,
     })
@@ -193,18 +237,21 @@ pub async fn run(
     server: Server,
     cancel: CancellationToken,
 ) -> Result<()> {
+    let Established {
+        handle, listener, ..
+    } = established;
     let mut tasks = JoinSet::new();
-    let mut health = tokio::time::interval(Duration::from_secs(2));
-    loop {
+    let result = loop {
         tokio::select! {
-            _ = cancel.cancelled() => break,
-            _ = health.tick() => {
-                if established.handle.is_closed() { return Err(HubError::new("ssh", "SSH 连接已断开")); }
-            }
+            _ = cancel.cancelled() => break Ok(()),
+            _ = handle.closed.cancelled() => break Err(HubError::new("ssh", "SSH 连接已断开")),
             Some(_) = tasks.join_next(), if !tasks.is_empty() => {},
-            accepted = established.listener.accept(), if tasks.len() < 128 => {
-                let (mut socket, peer) = accepted.map_err(|e| HubError::new("listen", e))?;
-                let handle = established.handle.clone();
+            accepted = listener.accept(), if tasks.len() < 128 => {
+                let (mut socket, peer) = match accepted {
+                    Ok(accepted) => accepted,
+                    Err(error) => break Err(HubError::new("listen", error)),
+                };
+                let handle = handle.handle.clone();
                 let host = server.panel_host.clone();
                 let port = server.panel_port;
                 tasks.spawn(async move {
@@ -216,14 +263,11 @@ pub async fn run(
                 });
             }
         }
-    }
+    };
+    drop(listener);
     tasks.abort_all();
-    let _ = tokio::time::timeout(
-        Duration::from_secs(2),
-        established
-            .handle
-            .disconnect(Disconnect::ByApplication, "closed", "en"),
-    )
-    .await;
-    Ok(())
+    // abort_all only requests cancellation; drain before reporting disconnected.
+    while tasks.join_next().await.is_some() {}
+    handle.close().await;
+    result
 }

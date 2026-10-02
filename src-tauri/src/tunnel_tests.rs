@@ -24,13 +24,25 @@ use zeroize::Zeroizing;
 #[derive(Clone)]
 struct TestSsh {
     password_attempts: Arc<AtomicUsize>,
+    live_sessions: Arc<AtomicUsize>,
+    is_session: bool,
     command: Vec<u8>,
     input: Vec<u8>,
 }
 impl server::Server for TestSsh {
     type Handler = Self;
     fn new_client(&mut self, _: Option<std::net::SocketAddr>) -> Self {
-        self.clone()
+        self.live_sessions.fetch_add(1, Ordering::SeqCst);
+        let mut session = self.clone();
+        session.is_session = true;
+        session
+    }
+}
+impl Drop for TestSsh {
+    fn drop(&mut self) {
+        if self.is_session {
+            self.live_sessions.fetch_sub(1, Ordering::SeqCst);
+        }
     }
 }
 impl server::Handler for TestSsh {
@@ -130,10 +142,13 @@ async fn verifies_host_before_credentials_forwards_concurrently_and_cleans_up() 
     let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
     let fingerprint = key.public_key().fingerprint(HashAlg::Sha256).to_string();
     let attempts = Arc::new(AtomicUsize::new(0));
+    let live_sessions = Arc::new(AtomicUsize::new(0));
     let ssh_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let ssh_port = ssh_listener.local_addr().unwrap().port();
     let mut ssh = TestSsh {
         password_attempts: attempts.clone(),
+        live_sessions: live_sessions.clone(),
+        is_session: false,
         command: Vec::new(),
         input: Vec::new(),
     };
@@ -201,10 +216,12 @@ async fn verifies_host_before_credentials_forwards_concurrently_and_cleans_up() 
                 .unwrap()
                 .unwrap();
             assert_eq!(response, data.as_bytes());
+            socket
         });
     }
+    let mut sockets = Vec::new();
     while let Some(result) = jobs.join_next().await {
-        result.unwrap();
+        sockets.push(result.unwrap());
     }
     cancel.cancel();
     tokio::time::timeout(Duration::from_secs(5), task)
@@ -213,6 +230,43 @@ async fn verifies_host_before_credentials_forwards_concurrently_and_cleans_up() 
         .unwrap()
         .unwrap();
     assert!(TcpStream::connect(local).await.is_err());
+    for mut socket in sockets {
+        let result = tokio::time::timeout(Duration::from_secs(1), socket.read(&mut [0]))
+            .await
+            .unwrap();
+        assert!(
+            matches!(result, Ok(0) | Err(_)),
+            "disconnect must close active forwarded sockets"
+        );
+    }
+    wait_for_no_sessions(&live_sessions).await;
+
+    // Repeatedly closing, abandoning and aborting connections must not leave
+    // russh's independently spawned I/O tasks behind.
+    for mode in 0..9 {
+        let tunnel = establish(&config, credential()).await.unwrap();
+        let local = tunnel.listener.local_addr().unwrap();
+        if mode % 3 == 0 {
+            drop(tunnel);
+        } else {
+            let cancel = CancellationToken::new();
+            let task = tokio::spawn(run(tunnel, config.clone(), cancel.clone()));
+            tokio::task::yield_now().await;
+            if mode % 3 == 1 {
+                cancel.cancel();
+                tokio::time::timeout(Duration::from_secs(1), task)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+            } else {
+                task.abort();
+                assert!(task.await.is_err());
+            }
+        }
+        wait_for_no_sessions(&live_sessions).await;
+        assert!(TcpStream::connect(local).await.is_err());
+    }
     let key_dir = tempfile::tempdir().unwrap();
     let key_path = key_dir.path().join("id_ed25519");
     let private = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
@@ -232,8 +286,20 @@ async fn verifies_host_before_credentials_forwards_concurrently_and_cleans_up() 
         .unwrap();
     assert_eq!(error.code, "reset");
     assert!(!error.message.contains("do not expose secret"));
+    handle.close().await;
+    wait_for_no_sessions(&live_sessions).await;
     ssh_task.abort();
     echo_task.abort();
+}
+
+async fn wait_for_no_sessions(live_sessions: &AtomicUsize) {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while live_sessions.load(Ordering::SeqCst) != 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("all SSH sessions must be released");
 }
 
 #[tokio::test]
@@ -245,10 +311,51 @@ async fn verifier_pins_the_exact_key() {
     let mut verifier = HostVerifier {
         expected: Some(fingerprint.clone()),
         observed: observed.clone(),
+        closed: CancellationToken::new(),
     };
     assert!(verifier
         .check_server_key(&PublicKeyOrCertificate::from(key.public_key().clone()))
         .await
         .unwrap());
     assert_eq!(observed.lock().unwrap().as_ref(), Some(&fingerprint));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelling_a_stalled_handshake_closes_the_ssh_socket() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut config = server();
+    config.host = "127.0.0.1".into();
+    config.port = listener.local_addr().unwrap().port();
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let peer = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        socket.write_all(b"SSH-2.0-stalled-test\r\n").await.unwrap();
+        // Wait for the client's KEXINIT packet, then leave key exchange pending.
+        let mut byte = [0];
+        loop {
+            socket.read_exact(&mut byte).await.unwrap();
+            if byte[0] == b'\n' {
+                break;
+            }
+        }
+        socket.read_exact(&mut byte).await.unwrap();
+        started_tx.send(()).unwrap();
+        let mut remaining = Vec::new();
+        socket.read_to_end(&mut remaining).await
+    });
+    let connection =
+        tokio::spawn(
+            async move { establish(&config, Some(Zeroizing::new("test-only".into()))).await },
+        );
+    tokio::time::timeout(Duration::from_secs(5), started_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    connection.abort();
+    assert!(connection.await.is_err());
+    let closed = tokio::time::timeout(Duration::from_secs(1), peer).await;
+    assert!(
+        closed.is_ok(),
+        "cancelling a connection must close the socket even during SSH key exchange"
+    );
 }

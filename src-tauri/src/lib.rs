@@ -1,6 +1,7 @@
 mod model;
 mod panel;
 mod preferences;
+mod ssh_transport;
 mod store;
 mod tunnel;
 #[cfg(test)]
@@ -16,6 +17,7 @@ use zeroize::Zeroizing;
 struct Connection {
     info: SessionInfo,
     cancel: CancellationToken,
+    stopped: CancellationToken,
 }
 struct Inner {
     servers: Vec<Server>,
@@ -217,6 +219,8 @@ async fn connect_server(
 ) -> Result<SessionInfo> {
     authorize(&webview)?;
     let cancel = CancellationToken::new();
+    let stopped = CancellationToken::new();
+    let stopped_guard = stopped.clone().drop_guard();
     let server = {
         let mut inner = hub.inner.lock().await;
         writable(&inner)?;
@@ -237,6 +241,7 @@ async fn connect_server(
                     message: None,
                 },
                 cancel: cancel.clone(),
+                stopped,
             },
         );
         server
@@ -280,6 +285,7 @@ async fn connect_server(
     let state = hub.inner.clone();
     let returned = info.clone();
     tauri::async_runtime::spawn(async move {
+        let _stopped_guard = stopped_guard;
         let result = tunnel::run(established, server, cancel.clone()).await;
         let mut inner = state.lock().await;
         if !cancel.is_cancelled() {
@@ -314,13 +320,25 @@ async fn disconnect_server(
     id: String,
 ) -> Result<()> {
     authorize(&webview)?;
-    if let Some(connection) = hub.inner.lock().await.connections.remove(&id) {
-        connection.cancel.cancel();
+    let (connection, closed) = {
+        // Serialize view removal with sync_panels so an in-flight layout cannot
+        // recreate a view after disconnect has already closed it.
+        let mut inner = hub.inner.lock().await;
+        let connection = inner.connections.remove(&id);
+        if let Some(connection) = &connection {
+            connection.cancel.cancel();
+        }
+        let closed = app
+            .get_webview(&format!("panel-{id}"))
+            .map(|panel| panel.close())
+            .transpose()
+            .map_err(|e| HubError::new("webview", e));
+        (connection, closed)
+    };
+    if let Some(connection) = connection {
+        connection.stopped.cancelled().await;
     }
-    if let Some(panel) = app.get_webview(&format!("panel-{id}")) {
-        panel.close().map_err(|e| HubError::new("webview", e))?;
-    }
-    Ok(())
+    closed.map(|_| ())
 }
 
 #[tauri::command]
@@ -576,11 +594,7 @@ async fn reset_panel_credentials(
         }
     };
     let result = panel::reset(&handle, &server.panel_username, &password).await;
-    let _ = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        handle.disconnect(russh::Disconnect::ByApplication, "done", "en"),
-    )
-    .await;
+    handle.close().await;
     result
 }
 
