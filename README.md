@@ -6,12 +6,11 @@
 
 ## 功能
 
-- 服务器配置、分组、搜索和颜色标记。
-- 单面板、左右分屏、上下分屏、四宫格。
-- 原生独立 Webview，每个服务器隔离浏览数据。
-- 面板主机、端口、路径、HTTP/HTTPS 均可配置。
-- 独立配置 S-UI 账号密码，支持自动登录和可选的远端管理员凭证重置。
-- 全局语言（中文 / English）与主题（浅色 / 深色 / 系统），同步到内嵌 S-UI 面板并持久保存。
+- 进行服务器 S-UI 面板配置和端口转发。
+- 添加服务器时可选自动初始化 S-UI / realm。
+- S-UI配置支持单面板、左右分屏、上下分屏、四宫格。
+- 独立配置 S-UI 账号密码，支持自动登录和凭证重置。
+- 全局语言与主题设置可同步到内嵌 S-UI 面板。
 
 ## 开发
 
@@ -27,6 +26,7 @@ npm run tauri dev
 ```bash
 npm run check
 npm test
+python tests/remote_scripts_test.py
 npm run build
 npx playwright install chromium
 npm run test:e2e

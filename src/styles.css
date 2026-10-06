@@ -9,6 +9,115 @@
   font-size: 13px;
   color-scheme: light;
 }
+.page-description,
+.form-hint {
+  color: #7c9083;
+  font-size: 12px;
+  line-height: 1.8;
+  margin: 10px 0 16px;
+}
+.forwarding-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 24px 0 12px;
+}
+.forwarding-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.forwarding-toolbar select {
+  min-width: 200px;
+  max-width: 300px;
+  padding: 9px;
+  border: 1px solid #dce6df;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+}
+.service-state {
+  color: #7c9083;
+  font-size: 12px;
+}
+.forwarding-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 18px;
+  margin-top: 24px;
+}
+.forwarding-card {
+  background: #fff;
+  border: 1px solid #e2eae5;
+  border-radius: 12px;
+  padding: 22px;
+  min-width: 0;
+}
+.forwarding-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.forwarding-title h2 {
+  font-size: 16px;
+  font-weight: 550;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.forwarding-title .status-badge {
+  flex-shrink: 0;
+}
+.forwarding-route {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 24px 0;
+}
+.forwarding-route > span {
+  flex: 1;
+  min-width: 0;
+}
+.forwarding-route small {
+  display: block;
+  color: #7c9083;
+  margin-bottom: 9px;
+  overflow-wrap: anywhere;
+}
+.forwarding-route code {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.forwarding-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid #e2eae5;
+  padding-top: 16px;
+}
+.forwarding-actions > span {
+  flex: 1;
+  font-size: 11px;
+  color: #7c9083;
+}
+.operation-notice {
+  padding: 12px 20px;
+  background: #edf5ef;
+  color: #43674e;
+  line-height: 1.8;
+}
+html[data-theme='dark'] .forwarding-card {
+  background: #18251f;
+  border-color: #304339;
+}
+html[data-theme='dark'] .forwarding-actions,
+html[data-theme='dark'] .forwarding-toolbar select {
+  border-color: #304339;
+}
+html[data-theme='dark'] .operation-notice {
+  background: #22392c;
+  color: #b4d1be;
+}
 * {
   box-sizing: border-box;
 }

@@ -1,6 +1,9 @@
+mod management;
 mod model;
 mod panel;
 mod preferences;
+mod realm;
+mod remote;
 mod ssh_transport;
 mod store;
 mod tunnel;
@@ -24,6 +27,7 @@ struct Inner {
     connections: HashMap<String, Connection>,
     pending_keys: HashMap<String, String>,
     load_error: Option<String>,
+    remote_operations: std::collections::HashSet<String>,
 }
 struct Hub {
     path: PathBuf,
@@ -53,6 +57,9 @@ fn writable(inner: &Inner) -> Result<()> {
     Ok(())
 }
 fn idle(inner: &Inner, id: &str) -> Result<()> {
+    if inner.remote_operations.contains(id) {
+        return Err(HubError::new("busy", "此服务器正在执行远端操作"));
+    }
     if inner.connections.contains_key(id) {
         return Err(HubError::new("busy", "请先断开此服务器"));
     }
@@ -91,6 +98,17 @@ async fn save_server(
     let old = inner.servers.iter().find(|s| s.id == server.id);
     let same_identity = old.is_some_and(|s| s.host == server.host && s.port == server.port);
     let same_auth = old.is_some_and(|s| s.auth_type == server.auth_type);
+    if !same_identity && old.is_some_and(|s| !s.forwarding_rules.is_empty()) {
+        return Err(HubError::new(
+            "realm",
+            "更改 SSH 地址前请先删除此服务器的转发规则",
+        ));
+    }
+    server.forwarding_rules = old.map(|s| s.forwarding_rules.clone()).unwrap_or_default();
+    server.realm_installed = same_identity && old.is_some_and(|s| s.realm_installed);
+    if !server.panel_enabled {
+        server.auto_login = false;
+    }
     server.host_fingerprint = if same_identity {
         old.and_then(|s| s.host_fingerprint.clone())
     } else {
@@ -149,6 +167,16 @@ async fn delete_server(webview: Webview, hub: State<'_, Hub>, id: String) -> Res
     idle(&inner, &id)?;
     if !inner.servers.iter().any(|s| s.id == id) {
         return Err(HubError::new("missing", "服务器不存在"));
+    }
+    if inner
+        .servers
+        .iter()
+        .any(|s| s.id == id && !s.forwarding_rules.is_empty())
+    {
+        return Err(HubError::new(
+            "realm",
+            "请先在端口转发模块删除此服务器的规则，再删除服务器",
+        ));
     }
     let next: Vec<_> = inner
         .servers
@@ -231,6 +259,9 @@ async fn connect_server(
             .find(|s| s.id == id)
             .cloned()
             .ok_or_else(|| HubError::new("missing", "服务器不存在"))?;
+        if !server.panel_enabled {
+            return Err(HubError::new("panel", "此服务器未启用 S-UI 面板"));
+        }
         inner.connections.insert(
             id.clone(),
             Connection {
@@ -649,6 +680,7 @@ pub fn run() {
                     connections: HashMap::new(),
                     pending_keys: HashMap::new(),
                     load_error,
+                    remote_operations: std::collections::HashSet::new(),
                 })),
             });
             Ok(())
@@ -669,7 +701,9 @@ pub fn run() {
             reveal_panel_password,
             reset_panel_credentials,
             read_preferences,
-            save_preferences
+            save_preferences,
+            management::initialize_service,
+            management::update_forwarding
         ])
         .build(tauri::generate_context!())
         .expect("failed to initialize S-UI Hub")

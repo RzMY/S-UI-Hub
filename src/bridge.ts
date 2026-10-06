@@ -1,23 +1,49 @@
 import { t } from './i18n'
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import type { PanelBounds, SaveServer, Server, Session } from './types'
+import { validateForwardRule } from './types'
+import type { PanelBounds, RuleChange, SaveServer, Server, Session } from './types'
 
 export const desktop = isTauri()
 const previewKey = 's-ui-hub.preview.servers.v1'
 
+const normalizeServer = (s: Server): Server => ({
+  ...s,
+  panelEnabled: s.panelEnabled ?? true,
+  realmInstalled: s.realmInstalled ?? false,
+  forwardingRules: s.forwardingRules ?? [],
+})
+
 function previewServers(): Server[] {
   try {
-    return JSON.parse(localStorage.getItem(previewKey) ?? '[]') as Server[]
+    return (JSON.parse(localStorage.getItem(previewKey) ?? '[]') as Server[]).map(normalizeServer)
   } catch {
     return []
   }
 }
 
 export const api = {
+  initializeService: (id: string, service: 'sui' | 'realm'): Promise<Server> =>
+    desktop
+      ? invoke('initialize_service', { id, service })
+      : Promise.reject({ code: 'preview', message: t('请在桌面应用中初始化服务') }),
+  updateForwarding: async (id: string, change: RuleChange): Promise<Server> => {
+    if (desktop) return invoke('update_forwarding', { id, change })
+    const servers = previewServers()
+    const server = servers.find((s) => s.id === id)
+    if (!server) throw new Error(t('服务器不存在'))
+    if (change.kind === 'save') {
+      const error = validateForwardRule(change.rule, server)
+      if (error) throw new Error(error)
+      server.forwardingRules = [...server.forwardingRules.filter((r) => r.id !== change.rule.id), change.rule]
+    } else if (change.kind === 'delete')
+      server.forwardingRules = server.forwardingRules.filter((r) => r.id !== change.id)
+    localStorage.setItem(previewKey, JSON.stringify(servers))
+    return server
+  },
   openRepository: (): Promise<void> => invoke('open_repository'),
-  listServers: (): Promise<Server[]> =>
-    desktop ? invoke('list_servers') : Promise.resolve(previewServers()),
+  listServers: async (): Promise<Server[]> =>
+    desktop ? (await invoke<Server[]>('list_servers')).map(normalizeServer) : previewServers(),
   listSessions: (): Promise<Session[]> => (desktop ? invoke('list_sessions') : Promise.resolve([])),
   saveServer: async ({
     server,
@@ -35,6 +61,8 @@ export const api = {
   },
   deleteServer: async (id: string): Promise<void> => {
     if (desktop) return invoke('delete_server', { id })
+    if (previewServers().find((s) => s.id === id)?.forwardingRules.length)
+      throw new Error(t('请先在端口转发模块删除此服务器的规则，再删除服务器'))
     localStorage.setItem(previewKey, JSON.stringify(previewServers().filter((s) => s.id !== id)))
   },
   connect: (id: string): Promise<Session> =>

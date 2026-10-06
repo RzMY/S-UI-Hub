@@ -51,6 +51,72 @@ pub struct Server {
     pub has_panel_secret: bool,
     #[serde(default)]
     pub auto_login: bool,
+    #[serde(default = "enabled_by_default")]
+    pub panel_enabled: bool,
+    #[serde(default)]
+    pub realm_installed: bool,
+    #[serde(default)]
+    pub forwarding_rules: Vec<ForwardRule>,
+}
+
+fn enabled_by_default() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ForwardRule {
+    pub id: String,
+    pub remark: String,
+    pub listen_port: u16,
+    pub remote_host: String,
+    pub remote_port: u16,
+    pub enabled: bool,
+}
+
+impl ForwardRule {
+    pub fn validate(&self) -> Result<()> {
+        let host = &self.remote_host;
+        let valid_host = host.parse::<std::net::IpAddr>().is_ok()
+            || (host.len() <= 253
+                && host.trim_end_matches('.').split('.').all(|label| {
+                    !label.is_empty()
+                        && label.len() <= 63
+                        && !label.starts_with('-')
+                        && !label.ends_with('-')
+                        && label
+                            .bytes()
+                            .all(|c| c.is_ascii_alphanumeric() || c == b'-')
+                }));
+        if uuid::Uuid::parse_str(&self.id).is_err()
+            || self.remark.len() > 240
+            || self.remark.chars().any(|c| c.is_control())
+            || !valid_host
+            || self.listen_port == 0
+            || self.remote_port == 0
+        {
+            return Err(HubError::new(
+                "validation",
+                "转发规则无效，请检查备注、目标地址和端口",
+            ));
+        }
+        Ok(())
+    }
+}
+
+pub fn validate_rules(rules: &[ForwardRule]) -> Result<()> {
+    if rules.len() > 256 {
+        return Err(HubError::new("validation", "每台服务器最多 256 条转发规则"));
+    }
+    let mut ids = std::collections::HashSet::new();
+    let mut ports = std::collections::HashSet::new();
+    for rule in rules {
+        rule.validate()?;
+        if !ids.insert(&rule.id) || !ports.insert(rule.listen_port) {
+            return Err(HubError::new("validation", "同一服务器的入站端口不能重复"));
+        }
+    }
+    Ok(())
 }
 
 impl Server {
@@ -72,21 +138,22 @@ impl Server {
             ));
         }
         if !host_valid(&self.host)
-            || !host_valid(&self.panel_host)
+            || (self.panel_enabled && !host_valid(&self.panel_host))
             || self.username.trim().is_empty()
         {
             return Err(HubError::new("validation", "主机或用户名无效"));
         }
-        if self.port == 0 || self.panel_port == 0 {
+        if self.port == 0 || (self.panel_enabled && self.panel_port == 0) {
             return Err(HubError::new("validation", "端口范围为 1–65535"));
         }
-        if !["http", "https"].contains(&self.panel_scheme.as_str())
-            || !self.panel_path.starts_with('/')
-            || self.panel_path.starts_with("//")
-            || self
-                .panel_path
-                .chars()
-                .any(|c| c.is_whitespace() || c.is_control() || "\\?#".contains(c))
+        if self.panel_enabled
+            && (!["http", "https"].contains(&self.panel_scheme.as_str())
+                || !self.panel_path.starts_with('/')
+                || self.panel_path.starts_with("//")
+                || self
+                    .panel_path
+                    .chars()
+                    .any(|c| c.is_whitespace() || c.is_control() || "\\?#".contains(c)))
         {
             return Err(HubError::new("validation", "面板协议或路径无效"));
         }
@@ -102,7 +169,7 @@ impl Server {
         {
             return Err(HubError::new("validation", "无效的颜色"));
         }
-        Ok(())
+        validate_rules(&self.forwarding_rules)
     }
 }
 
@@ -147,6 +214,9 @@ pub(crate) mod tests {
             panel_username: String::new(),
             has_panel_secret: false,
             auto_login: false,
+            panel_enabled: true,
+            realm_installed: false,
+            forwarding_rules: Vec::new(),
         }
     }
     #[test]

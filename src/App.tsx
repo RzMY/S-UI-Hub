@@ -36,6 +36,7 @@ import {
 } from 'lucide-react'
 import { api, desktop } from './bridge'
 import ServerDialog from './ServerDialog'
+import ForwardingPage from './ForwardingPage'
 import { assignPanel, freshServer, getError, layoutSlots } from './types'
 import type { HubError, Layout, PanelBounds, SaveServer, Server, Session } from './types'
 
@@ -62,7 +63,8 @@ export default function App() {
   const [sessions, setSessions] = useState<Record<string, Session>>({})
   const [search, setSearch] = useState('')
   const [group, setGroup] = useState('all')
-  const [page, setPage] = useState<'servers' | 'workspace'>('servers')
+  const [page, setPage] = useState<'servers' | 'workspace' | 'forwarding'>('servers')
+  const [remoteProgress, setRemoteProgress] = useState('')
   const [layout, setLayout] = useState<Layout>('single')
   const [panes, setPanes] = useState<(string | null)[]>([null, null, null, null])
   const [activeSlot, setActiveSlot] = useState(0)
@@ -264,6 +266,60 @@ export default function App() {
     await api.disconnect(id)
     setSessions((s) => ({ ...s, [id]: { id, status: 'disconnected' } }))
   }
+  function updateServer(saved: Server) {
+    setServers((current) =>
+      current.some((s) => s.id === saved.id)
+        ? current.map((s) => (s.id === saved.id ? saved : s))
+        : [...current, saved],
+    )
+  }
+  async function runRemote(server: Server, action: () => Promise<void>): Promise<void> {
+    try {
+      await action()
+    } catch (error) {
+      const e = getError(error)
+      if (e.code !== 'host_key_unknown' || !e.fingerprint) throw error
+      setConfirm({
+        title: t('信任此服务器？'),
+        message: t(
+          '{0}@{1}:{2} · 请通过服务器控制台或管理员核对指纹。',
+          server.username,
+          server.host,
+          server.port,
+        ),
+        fingerprint: e.fingerprint,
+        action: t('信任并继续'),
+        run: async () => {
+          await api.trust(server.id, e.fingerprint!)
+          setServers(await api.listServers())
+          setConfirm(null)
+          await runRemote(server, action)
+        },
+      })
+    }
+  }
+  async function initialize(server: Server, services: ('sui' | 'realm')[]) {
+    let index = 0
+    await runRemote(server, async () => {
+      try {
+        while (index < services.length) {
+          const service = services[index]
+          setRemoteProgress(
+            t(
+              '正在为 {0} 初始化 {1}，下载和安装可能需要几分钟…',
+              server.name,
+              service === 'sui' ? 'S-UI' : 'realm',
+            ),
+          )
+          updateServer(await api.initializeService(server.id, service))
+          index++
+        }
+        notify(t('所选服务初始化完成'))
+      } finally {
+        setRemoteProgress('')
+      }
+    })
+  }
   async function save(value: SaveServer) {
     const saved = await api.saveServer(value)
     setServers((current) =>
@@ -272,6 +328,13 @@ export default function App() {
         : [...current, saved],
     )
     notify(t('服务器已保存'))
+    const services: ('sui' | 'realm')[] = []
+    if (value.initializeRealm) services.push('realm')
+    if (value.initializeSui) services.push('sui')
+    if (services.length) {
+      setEditing(null)
+      void initialize(saved, services).catch(report)
+    }
     if (value.resetPanel) {
       const target = `${saved.host}:${saved.port}`
       const runReset = async () => {
@@ -415,6 +478,14 @@ export default function App() {
             {t('面板工作区')}
             <ChevronRight className="nav-tail" size={15} />
           </button>
+          <button
+            className={`nav-item ${page === 'forwarding' ? 'selected' : ''}`}
+            onClick={() => setPage('forwarding')}
+          >
+            <ArrowUpRight size={17} />
+            {t('端口转发')}
+            <ChevronRight className="nav-tail" size={15} />
+          </button>
         </nav>
         <div className="nav-caption group-caption">
           {t('服务器分组')}
@@ -504,6 +575,12 @@ export default function App() {
                     { id: 'all', label: t('全部服务器'), Icon: ServerIcon, target: 'servers' as const },
                     { id: 'connected', label: t('已连接'), Icon: Link2, target: 'servers' as const },
                     { id: 'workspace', label: t('面板工作区'), Icon: Columns2, target: 'workspace' as const },
+                    {
+                      id: 'forwarding',
+                      label: t('端口转发'),
+                      Icon: ArrowUpRight,
+                      target: 'forwarding' as const,
+                    },
                     ...groups.map((name) => ({
                       id: name,
                       label: name,
@@ -514,7 +591,7 @@ export default function App() {
                     <button
                       key={target + id}
                       aria-current={
-                        page === target && (target === 'workspace' || group === id) ? 'page' : undefined
+                        page === target && (target !== 'servers' || group === id) ? 'page' : undefined
                       }
                       onClick={() => {
                         setPage(target)
@@ -535,13 +612,15 @@ export default function App() {
             </div>
             <ChevronRight size={13} />
             <strong>
-              {page === 'workspace'
-                ? t('面板工作区')
-                : group === 'all'
-                  ? t('全部服务器')
-                  : group === 'connected'
-                    ? t('已连接')
-                    : group}
+              {page === 'forwarding'
+                ? t('端口转发')
+                : page === 'workspace'
+                  ? t('面板工作区')
+                  : group === 'all'
+                    ? t('全部服务器')
+                    : group === 'connected'
+                      ? t('已连接')
+                      : group}
             </strong>
           </div>
           <div className="topbar-right">
@@ -552,6 +631,11 @@ export default function App() {
             </span>
           </div>
         </header>
+        {remoteProgress && (
+          <div className="operation-notice" role="status">
+            {remoteProgress}
+          </div>
+        )}
         {page === 'servers' ? (
           <div className="server-page">
             <div className="page-heading">
@@ -769,20 +853,28 @@ export default function App() {
                       <div className="card-divider" />
                       <div className="card-bottom">
                         <span className="panel-endpoint">
-                          <span className="panel-icon">S</span>S-UI <span>:{server.panelPort}</span>
+                          {server.panelEnabled ? (
+                            <>
+                              <span className="panel-icon">S</span>S-UI <span>:{server.panelPort}</span>
+                            </>
+                          ) : (
+                            <>{server.realmInstalled ? 'realm' : t('仅 SSH')}</>
+                          )}
                         </span>
                         <button
                           className={`connect-button ${status === 'connected' ? 'is-connected' : ''}`}
                           disabled={status === 'connecting'}
-                          onClick={() => void connect(server)}
+                          onClick={() => (server.panelEnabled ? void connect(server) : setPage('forwarding'))}
                         >
-                          {status === 'connected'
-                            ? t('打开面板')
-                            : status === 'connecting'
-                              ? t('连接中…')
-                              : status === 'error'
-                                ? t('重新连接')
-                                : t('连接')}
+                          {!server.panelEnabled
+                            ? t('端口转发')
+                            : status === 'connected'
+                              ? t('打开面板')
+                              : status === 'connecting'
+                                ? t('连接中…')
+                                : status === 'error'
+                                  ? t('重新连接')
+                                  : t('连接')}
                           {status === 'connecting' ? (
                             <LoaderCircle className="spin" size={14} />
                           ) : (
@@ -802,6 +894,13 @@ export default function App() {
               </div>
             )}
           </div>
+        ) : page === 'forwarding' ? (
+          <ForwardingPage
+            servers={servers}
+            onUpdate={updateServer}
+            runRemote={runRemote}
+            onInitialize={initialize}
+          />
         ) : (
           <div className="workspace-page">
             <div className="workspace-heading">
@@ -1065,32 +1164,34 @@ export default function App() {
               </button>
             </header>
             <div className="picker-list">
-              {servers.length ? (
-                servers.map((server) => (
-                  <button
-                    key={server.id}
-                    onClick={() => {
-                      const slot = picker
-                      setPicker(null)
-                      void connect(server, slot)
-                    }}
-                  >
-                    <span
-                      className="server-symbol"
-                      style={{ '--server-color': server.color } as React.CSSProperties}
+              {servers.some((s) => s.panelEnabled) ? (
+                servers
+                  .filter((s) => s.panelEnabled)
+                  .map((server) => (
+                    <button
+                      key={server.id}
+                      onClick={() => {
+                        const slot = picker
+                        setPicker(null)
+                        void connect(server, slot)
+                      }}
                     >
-                      <ServerIcon size={21} />
-                    </span>
-                    <span className="picker-name">
-                      {server.name}
-                      <small>{server.host}</small>
-                    </span>
-                    <span
-                      className={`tiny-dot ${sessions[server.id]?.status === 'connected' ? 'live' : ''}`}
-                    />
-                    <ChevronRight size={16} />
-                  </button>
-                ))
+                      <span
+                        className="server-symbol"
+                        style={{ '--server-color': server.color } as React.CSSProperties}
+                      >
+                        <ServerIcon size={21} />
+                      </span>
+                      <span className="picker-name">
+                        {server.name}
+                        <small>{server.host}</small>
+                      </span>
+                      <span
+                        className={`tiny-dot ${sessions[server.id]?.status === 'connected' ? 'live' : ''}`}
+                      />
+                      <ChevronRight size={16} />
+                    </button>
+                  ))
               ) : (
                 <div className="state-message">
                   <ServerIcon size={28} />

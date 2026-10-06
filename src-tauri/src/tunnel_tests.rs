@@ -82,6 +82,25 @@ impl server::Handler for TestSsh {
         channel: russh::ChannelId,
         session: &mut server::Session,
     ) -> std::result::Result<(), Self::Error> {
+        if self.command == crate::remote::command("test-script").as_bytes() {
+            match self.input.as_slice() {
+                b"ok\n" => {
+                    session.data(channel, b"HUB_OK\n".to_vec())?;
+                    session.exit_status_request(channel, 0)?;
+                }
+                b"bad-exit\n" => {
+                    session.data(channel, b"HUB_OK\n".to_vec())?;
+                    session.exit_status_request(channel, 1)?;
+                }
+                _ => {
+                    session.data(channel, b"private-password-output\n".to_vec())?;
+                    session.exit_status_request(channel, 0)?;
+                }
+            }
+            session.eof(channel)?;
+            session.close(channel)?;
+            return Ok(());
+        }
         assert_eq!(
             self.command,
             crate::panel::RESET_COMMAND.as_bytes(),
@@ -286,6 +305,17 @@ async fn verifies_host_before_credentials_forwards_concurrently_and_cleans_up() 
         .unwrap();
     assert_eq!(error.code, "reset");
     assert!(!error.message.contains("do not expose secret"));
+    // Service operations use SSH without needing a working panel forwarding target.
+    crate::remote::run(&handle, "test-script", "ok\n", 2)
+        .await
+        .unwrap();
+    for input in ["bad-exit\n", "missing-marker\n"] {
+        let error = crate::remote::run(&handle, "test-script", input, 2)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "remote");
+        assert!(!error.message.contains("private-password-output"));
+    }
     handle.close().await;
     wait_for_no_sessions(&live_sessions).await;
     ssh_task.abort();

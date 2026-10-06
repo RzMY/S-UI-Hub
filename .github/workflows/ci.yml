@@ -25,6 +25,7 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm test
+      - run: python3 tests/remote_scripts_test.py
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e

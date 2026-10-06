@@ -24,6 +24,8 @@ export default function ServerDialog({
   const [panelSecret, setPanelSecret] = useState('')
   const [clearPanelSecret, setClearPanelSecret] = useState(false)
   const [resetPanel, setResetPanel] = useState(false)
+  const [initializeSui, setInitializeSui] = useState(false)
+  const [initializeRealm, setInitializeRealm] = useState(false)
   const [showPanelPassword, setShowPanelPassword] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -57,7 +59,7 @@ export default function ServerDialog({
       return
     }
     if (
-      (server.autoLogin || resetPanel || panelSecret) &&
+      (server.autoLogin || resetPanel || initializeSui || panelSecret) &&
       (!server.panelUsername.trim() || (!panelSecret && (!server.hasPanelSecret || clearPanelSecret)))
     ) {
       setError(t('请输入面板账号和密码'))
@@ -77,6 +79,8 @@ export default function ServerDialog({
         panelSecret: panelSecret || null,
         clearPanelSecret,
         resetPanel,
+        initializeSui,
+        initializeRealm,
       })
       onClose()
     } catch (e) {
@@ -273,148 +277,203 @@ export default function ServerDialog({
                 {t('清除已保存的口令')}
               </label>
             )}
-            <h3 className="form-section">
-              <ServerIcon size={15} />
-              {t('S-UI 面板')}
-            </h3>
-            <div className="form-row">
-              <label className="protocol-field">
-                {t('协议')}
-                <select
-                  value={server.panelScheme}
-                  onChange={(e) => field('panelScheme', e.target.value as 'http' | 'https')}
-                >
-                  <option value="http">HTTP</option>
-                  <option value="https">HTTPS</option>
-                </select>
-              </label>
-              <label className="grow">
-                {t('面板主机')}
-                <input
-                  required
-                  value={server.panelHost}
-                  onChange={(e) => field('panelHost', e.target.value)}
-                />
-              </label>
-              <label className="port-field">
-                {t('端口')}
-                <input
-                  required
-                  type="number"
-                  min="1"
-                  max="65535"
-                  value={server.panelPort}
-                  onChange={(e) => field('panelPort', Number(e.target.value))}
-                />
-              </label>
-            </div>
-            <label>
-              {t('面板路径')}
+            <h3 className="form-section">{t('服务与初始化')}</h3>
+            <label className="checkbox-label">
               <input
-                required
-                placeholder="/"
-                value={server.panelPath}
-                onChange={(e) => field('panelPath', e.target.value)}
+                type="checkbox"
+                checked={server.panelEnabled}
+                onChange={(e) => {
+                  field('panelEnabled', e.target.checked)
+                  if (!e.target.checked) {
+                    field('autoLogin', false)
+                    setInitializeSui(false)
+                    setResetPanel(false)
+                    setPanelSecret('')
+                  }
+                }}
               />
+              {t('启用 S-UI 面板管理')}
             </label>
-            <h3 className="form-section">
-              <KeyRound size={15} />
-              {t('面板登录')}
-            </h3>
-            <div className="form-row">
-              <label className="grow">
-                {t('面板账号')}
-                <input
-                  maxLength={128}
-                  autoComplete="off"
-                  placeholder={t('S-UI 登录账号')}
-                  value={server.panelUsername}
-                  onChange={(e) => field('panelUsername', e.target.value)}
-                />
-              </label>
-              <label className="grow">
-                {t('面板密码')}
-                <div className="password-field">
-                  <input
-                    type={showPanelPassword ? 'text' : 'password'}
-                    autoComplete="new-password"
-                    disabled={!desktop}
-                    placeholder={
-                      !desktop
-                        ? t('桌面应用中可保存凭证')
-                        : initial.hasPanelSecret
-                          ? t('已保存，留空保留')
-                          : t('S-UI 登录密码')
-                    }
-                    value={panelSecret}
-                    onChange={(e) => {
-                      setPanelSecret(e.target.value)
-                      setClearPanelSecret(false)
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="icon-button"
-                    disabled={!desktop}
-                    aria-label={showPanelPassword ? t('隐藏面板密码') : t('显示面板密码')}
-                    onClick={async () => {
-                      if (showPanelPassword) {
-                        setShowPanelPassword(false)
-                        return
-                      }
-                      if (!panelSecret && initial.hasPanelSecret && !clearPanelSecret) {
-                        try {
-                          setPanelSecret(await api.revealPanelPassword(initial.id))
-                        } catch {
-                          setError(t('无法读取已保存的面板密码'))
-                          return
-                        }
-                      }
-                      setShowPanelPassword(true)
-                    }}
-                  >
-                    {showPanelPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                </div>
-              </label>
-            </div>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                disabled={!desktop || !server.panelEnabled}
+                checked={initializeSui}
+                onChange={(e) => {
+                  setInitializeSui(e.target.checked)
+                  setResetPanel(false)
+                }}
+              />
+              {t('保存后初始化 S-UI')}
+            </label>
             <label className="checkbox-label">
               <input
                 type="checkbox"
                 disabled={!desktop}
-                checked={server.autoLogin}
-                onChange={(e) => field('autoLogin', e.target.checked)}
+                checked={initializeRealm}
+                onChange={(e) => {
+                  setInitializeRealm(e.target.checked)
+                  setResetPanel(false)
+                }}
               />
-              {t('连接后自动登录')}
+              {t('保存后初始化 realm')}
             </label>
-            {initial.hasPanelSecret && (
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={clearPanelSecret}
-                  onChange={(e) => {
-                    setClearPanelSecret(e.target.checked)
-                    setPanelSecret('')
-                    field('autoLogin', false)
-                    setResetPanel(false)
-                  }}
-                />
-                {t('清除已保存的面板密码')}
-              </label>
+            <p className="form-hint">
+              {t(
+                '两项初始化均可选。仅转发可关闭 S-UI；已有面板无需初始化。支持 Alpine / Ubuntu，需 root 或免密 sudo。',
+              )}
+            </p>
+            {initializeSui && (
+              <p className="reset-notice">
+                {t('将新装 S-UI，使用下方端口、路径和账号密码。已有安装会被保留。')}
+              </p>
             )}
-            <label className="checkbox-label reset-option">
-              <input
-                type="checkbox"
-                disabled={!desktop}
-                checked={resetPanel}
-                onChange={(e) => setResetPanel(e.target.checked)}
-              />
-              {t('同时重置远端 S-UI 账号密码')}
-            </label>
-            {resetPanel && (
-              <div className="reset-notice">
-                {t('将把此 SSH 服务器上的第一个 S-UI 管理员修改为上方账号密码。保存后需再次确认。')}
-              </div>
+            {server.panelEnabled && (
+              <>
+                <h3 className="form-section">
+                  <ServerIcon size={15} />
+                  {t('S-UI 面板')}
+                </h3>
+                <div className="form-row">
+                  <label className="protocol-field">
+                    {t('协议')}
+                    <select
+                      value={server.panelScheme}
+                      onChange={(e) => field('panelScheme', e.target.value as 'http' | 'https')}
+                    >
+                      <option value="http">HTTP</option>
+                      <option value="https">HTTPS</option>
+                    </select>
+                  </label>
+                  <label className="grow">
+                    {t('面板主机')}
+                    <input
+                      required
+                      value={server.panelHost}
+                      onChange={(e) => field('panelHost', e.target.value)}
+                    />
+                  </label>
+                  <label className="port-field">
+                    {t('端口')}
+                    <input
+                      required
+                      type="number"
+                      min="1"
+                      max="65535"
+                      value={server.panelPort}
+                      onChange={(e) => field('panelPort', Number(e.target.value))}
+                    />
+                  </label>
+                </div>
+                <label>
+                  {t('面板路径')}
+                  <input
+                    required
+                    placeholder="/"
+                    value={server.panelPath}
+                    onChange={(e) => field('panelPath', e.target.value)}
+                  />
+                </label>
+                <h3 className="form-section">
+                  <KeyRound size={15} />
+                  {t('面板登录')}
+                </h3>
+                <div className="form-row">
+                  <label className="grow">
+                    {t('面板账号')}
+                    <input
+                      maxLength={128}
+                      autoComplete="off"
+                      placeholder={t('S-UI 登录账号')}
+                      value={server.panelUsername}
+                      onChange={(e) => field('panelUsername', e.target.value)}
+                    />
+                  </label>
+                  <label className="grow">
+                    {t('面板密码')}
+                    <div className="password-field">
+                      <input
+                        type={showPanelPassword ? 'text' : 'password'}
+                        autoComplete="new-password"
+                        disabled={!desktop}
+                        placeholder={
+                          !desktop
+                            ? t('桌面应用中可保存凭证')
+                            : initial.hasPanelSecret
+                              ? t('已保存，留空保留')
+                              : t('S-UI 登录密码')
+                        }
+                        value={panelSecret}
+                        onChange={(e) => {
+                          setPanelSecret(e.target.value)
+                          setClearPanelSecret(false)
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="icon-button"
+                        disabled={!desktop}
+                        aria-label={showPanelPassword ? t('隐藏面板密码') : t('显示面板密码')}
+                        onClick={async () => {
+                          if (showPanelPassword) {
+                            setShowPanelPassword(false)
+                            return
+                          }
+                          if (!panelSecret && initial.hasPanelSecret && !clearPanelSecret) {
+                            try {
+                              setPanelSecret(await api.revealPanelPassword(initial.id))
+                            } catch {
+                              setError(t('无法读取已保存的面板密码'))
+                              return
+                            }
+                          }
+                          setShowPanelPassword(true)
+                        }}
+                      >
+                        {showPanelPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </label>
+                </div>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    disabled={!desktop}
+                    checked={server.autoLogin}
+                    onChange={(e) => field('autoLogin', e.target.checked)}
+                  />
+                  {t('连接后自动登录')}
+                </label>
+                {initial.hasPanelSecret && (
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={clearPanelSecret}
+                      onChange={(e) => {
+                        setClearPanelSecret(e.target.checked)
+                        setPanelSecret('')
+                        field('autoLogin', false)
+                        setResetPanel(false)
+                      }}
+                    />
+                    {t('清除已保存的面板密码')}
+                  </label>
+                )}
+                <label className="checkbox-label reset-option">
+                  <input
+                    type="checkbox"
+                    disabled={!desktop || initializeSui || initializeRealm}
+                    checked={resetPanel}
+                    onChange={(e) => setResetPanel(e.target.checked)}
+                  />
+                  {t('同时重置远端 S-UI 账号密码')}
+                </label>
+                {resetPanel && (
+                  <div className="reset-notice">
+                    {t('将把此 SSH 服务器上的第一个 S-UI 管理员修改为上方账号密码。保存后需再次确认。')}
+                  </div>
+                )}
+              </>
             )}
             {initial.hostFingerprint && (
               <div className="fingerprint-row">
