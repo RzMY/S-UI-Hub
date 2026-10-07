@@ -122,7 +122,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("servers.json");
         let mut legacy = serde_json::to_value(crate::model::tests::server()).unwrap();
-        for field in ["panelEnabled", "realmInstalled", "forwardingRules"] {
+        for field in [
+            "panelEnabled",
+            "realmEnabled",
+            "realmInstalled",
+            "forwardingRules",
+            "autoLogin",
+        ] {
             legacy.as_object_mut().unwrap().remove(field);
         }
         std::fs::write(
@@ -132,6 +138,8 @@ mod tests {
         .unwrap();
         let mut servers = read(&path).unwrap();
         assert!(servers[0].panel_enabled);
+        assert!(servers[0].realm_enabled);
+        assert!(!servers[0].auto_login);
         assert!(!servers[0].realm_installed);
         servers[0].panel_enabled = false;
         servers[0].panel_host.clear();

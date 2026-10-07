@@ -1,3 +1,17 @@
+# Verify an existing Hub installation before any package, binary or service writes.
+hub_binary=/usr/local/lib/s-ui-hub/realm
+if [ -e "$hub_binary" ] || [ -L "$hub_binary" ]; then
+    [ -x "$hub_binary" ] && "$hub_binary" --version || fail HUB_REALM_EXISTS
+    if { [ "$hub_init" = openrc ] && [ -f /etc/init.d/s-ui-hub-realm ]; } ||
+       { [ "$hub_init" = systemd ] && [ -f /etc/systemd/system/s-ui-hub-realm.service ]; }; then
+        printf 'HUB_OK\n'
+        exit 0
+    fi
+else
+    for hub_existing in /etc/s-ui-hub/realm.json /etc/init.d/s-ui-hub-realm /etc/systemd/system/s-ui-hub-realm.service; do
+        if [ -e "$hub_existing" ] || [ -L "$hub_existing" ]; then fail HUB_REALM_EXISTS; fi
+    done
+fi
 case "$(uname -m)" in
     x86_64|amd64) hub_arch=x86_64; hub_sha=b1cc335547bea8bb2a88178bef12ec7f2363e36200e7ea1d4e1e67627929bf65 ;;
     aarch64|arm64) hub_arch=aarch64; hub_sha=f4c0318dd86854da483dcb7645b4f39cae2cc3f91c688fef969d53220b949488 ;;

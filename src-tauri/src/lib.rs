@@ -87,10 +87,14 @@ async fn save_server(
     mut server: Server,
     secret: Option<String>,
     clear_secret: bool,
-    panel_secret: Option<String>,
-    clear_panel_secret: bool,
+    panel_credentials: panel::CredentialInput,
 ) -> Result<Server> {
     authorize(&webview)?;
+    let panel::CredentialInput {
+        secret: panel_secret,
+        clear: clear_panel_secret,
+        action: credential_action,
+    } = panel_credentials;
     server.validate()?;
     let mut inner = hub.inner.lock().await;
     writable(&inner)?;
@@ -106,6 +110,12 @@ async fn save_server(
     }
     server.forwarding_rules = old.map(|s| s.forwarding_rules.clone()).unwrap_or_default();
     server.realm_installed = same_identity && old.is_some_and(|s| s.realm_installed);
+    if !server.realm_enabled && !server.forwarding_rules.is_empty() {
+        return Err(HubError::new(
+            "realm",
+            "停用 realm 管理前请先删除此服务器的转发规则",
+        ));
+    }
     if !server.panel_enabled {
         server.auto_login = false;
     }
@@ -118,7 +128,16 @@ async fn save_server(
     server.has_panel_secret = old.is_some_and(|s| s.has_panel_secret);
     let mut next = inner.servers.clone();
     let secret = secret.map(Zeroizing::new);
-    let panel_secret = panel_secret.map(Zeroizing::new);
+    let mut panel_secret = panel_secret.map(Zeroizing::new);
+    if let Some(action) = credential_action {
+        if !server.panel_enabled || clear_panel_secret {
+            return Err(HubError::new(
+                "credentials",
+                "初始化或重置时需要启用面板并保留凭据",
+            ));
+        }
+        panel::prepare_credentials(&mut server, &mut panel_secret, action)?;
+    }
     let change_secret = clear_secret || secret.is_some() || (!same_auth && old.is_some());
     let panel_key = format!("panel:{}", server.id);
     let mut changes = Vec::new();
@@ -142,12 +161,6 @@ async fn save_server(
         }
         changes.push((panel_key.as_str(), value));
         server.has_panel_secret = value.is_some();
-    }
-    if server.auto_login && (server.panel_username.trim().is_empty() || !server.has_panel_secret) {
-        return Err(HubError::new(
-            "credentials",
-            "开启自动登录需要面板账号和密码",
-        ));
     }
     match next.iter_mut().find(|s| s.id == server.id) {
         Some(s) => *s = server.clone(),
@@ -480,6 +493,8 @@ async fn sync_panels(
                         }
                         if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
                             && login_server.auto_login
+                            && login_server.has_panel_secret
+                            && !login_server.panel_username.trim().is_empty()
                             && payload.url().path().trim_end_matches('/')
                                 == format!(
                                     "{}/login",

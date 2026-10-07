@@ -24,7 +24,7 @@ export default function ServerDialog({
   const [panelSecret, setPanelSecret] = useState('')
   const [clearPanelSecret, setClearPanelSecret] = useState(false)
   const [resetPanel, setResetPanel] = useState(false)
-  const [initializeSui, setInitializeSui] = useState(false)
+  const [initializeSui, setInitializeSui] = useState(!editing && initial.panelEnabled)
   const [initializeRealm, setInitializeRealm] = useState(false)
   const [showPanelPassword, setShowPanelPassword] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -58,15 +58,8 @@ export default function ServerDialog({
       setError(t('请输入 SSH 密码'))
       return
     }
-    if (
-      (server.autoLogin || resetPanel || initializeSui || panelSecret) &&
-      (!server.panelUsername.trim() || (!panelSecret && (!server.hasPanelSecret || clearPanelSecret)))
-    ) {
+    if (desktop && !resetPanel && !initializeSui && panelSecret && !server.panelUsername.trim()) {
       setError(t('请输入面板账号和密码'))
-      return
-    }
-    if (resetPanel && !panelSecret) {
-      setError(t('重置时请明确填写新的面板密码'))
       return
     }
     setBusy(true)
@@ -79,8 +72,8 @@ export default function ServerDialog({
         panelSecret: panelSecret || null,
         clearPanelSecret,
         resetPanel,
-        initializeSui,
-        initializeRealm,
+        initializeSui: desktop && server.panelEnabled && initializeSui,
+        initializeRealm: desktop && server.realmEnabled && initializeRealm,
       })
       onClose()
     } catch (e) {
@@ -285,7 +278,6 @@ export default function ServerDialog({
                 onChange={(e) => {
                   field('panelEnabled', e.target.checked)
                   if (!e.target.checked) {
-                    field('autoLogin', false)
                     setInitializeSui(false)
                     setResetPanel(false)
                     setPanelSecret('')
@@ -294,39 +286,45 @@ export default function ServerDialog({
               />
               {t('启用 S-UI 面板管理')}
             </label>
+            {server.panelEnabled && (
+              <label className="checkbox-label service-option">
+                <input
+                  type="checkbox"
+                  disabled={!desktop || !server.panelEnabled}
+                  checked={initializeSui}
+                  onChange={(e) => {
+                    setInitializeSui(e.target.checked)
+                    setResetPanel(false)
+                    if (e.target.checked) setClearPanelSecret(false)
+                  }}
+                />
+                {t('初始化 S-UI（未安装时安装）')}
+              </label>
+            )}
             <label className="checkbox-label">
               <input
                 type="checkbox"
-                disabled={!desktop || !server.panelEnabled}
-                checked={initializeSui}
+                checked={server.realmEnabled}
                 onChange={(e) => {
-                  setInitializeSui(e.target.checked)
-                  setResetPanel(false)
+                  field('realmEnabled', e.target.checked)
+                  if (!e.target.checked) setInitializeRealm(false)
                 }}
               />
-              {t('保存后初始化 S-UI')}
+              {t('启用 realm 端口转发管理')}
             </label>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                disabled={!desktop}
-                checked={initializeRealm}
-                onChange={(e) => {
-                  setInitializeRealm(e.target.checked)
-                  setResetPanel(false)
-                }}
-              />
-              {t('保存后初始化 realm')}
-            </label>
-            <p className="form-hint">
-              {t(
-                '两项初始化均可选。仅转发可关闭 S-UI；已有面板无需初始化。支持 Alpine / Ubuntu，需 root 或免密 sudo。',
-              )}
-            </p>
-            {initializeSui && (
-              <p className="reset-notice">
-                {t('将新装 S-UI，使用下方端口、路径和账号密码。已有安装会被保留。')}
-              </p>
+            {server.realmEnabled && (
+              <label className="checkbox-label service-option">
+                <input
+                  type="checkbox"
+                  disabled={!desktop}
+                  checked={initializeRealm}
+                  onChange={(e) => {
+                    setInitializeRealm(e.target.checked)
+                    setResetPanel(false)
+                  }}
+                />
+                {t('初始化 realm（未安装时安装）')}
+              </label>
             )}
             {server.panelEnabled && (
               <>
@@ -384,7 +382,7 @@ export default function ServerDialog({
                     <input
                       maxLength={128}
                       autoComplete="off"
-                      placeholder={t('S-UI 登录账号')}
+                      placeholder={initializeSui || resetPanel ? t('留空随机生成') : t('S-UI 登录账号')}
                       value={server.panelUsername}
                       onChange={(e) => field('panelUsername', e.target.value)}
                     />
@@ -399,9 +397,13 @@ export default function ServerDialog({
                         placeholder={
                           !desktop
                             ? t('桌面应用中可保存凭证')
-                            : initial.hasPanelSecret
-                              ? t('已保存，留空保留')
-                              : t('S-UI 登录密码')
+                            : resetPanel
+                              ? t('留空随机生成')
+                              : initial.hasPanelSecret
+                                ? t('已保存，留空保留')
+                                : initializeSui
+                                  ? t('留空随机生成')
+                                  : t('S-UI 登录密码')
                         }
                         value={panelSecret}
                         onChange={(e) => {
@@ -419,7 +421,7 @@ export default function ServerDialog({
                             setShowPanelPassword(false)
                             return
                           }
-                          if (!panelSecret && initial.hasPanelSecret && !clearPanelSecret) {
+                          if (!panelSecret && initial.hasPanelSecret && !clearPanelSecret && !resetPanel) {
                             try {
                               setPanelSecret(await api.revealPanelPassword(initial.id))
                             } catch {
@@ -448,6 +450,7 @@ export default function ServerDialog({
                   <label className="checkbox-label">
                     <input
                       type="checkbox"
+                      disabled={initializeSui || resetPanel}
                       checked={clearPanelSecret}
                       onChange={(e) => {
                         setClearPanelSecret(e.target.checked)
@@ -464,15 +467,13 @@ export default function ServerDialog({
                     type="checkbox"
                     disabled={!desktop || initializeSui || initializeRealm}
                     checked={resetPanel}
-                    onChange={(e) => setResetPanel(e.target.checked)}
+                    onChange={(e) => {
+                      setResetPanel(e.target.checked)
+                      setClearPanelSecret(false)
+                    }}
                   />
                   {t('同时重置远端 S-UI 账号密码')}
                 </label>
-                {resetPanel && (
-                  <div className="reset-notice">
-                    {t('将把此 SSH 服务器上的第一个 S-UI 管理员修改为上方账号密码。保存后需再次确认。')}
-                  </div>
-                )}
               </>
             )}
             {initial.hostFingerprint && (

@@ -23,6 +23,7 @@ export interface Server {
   hasPanelSecret: boolean
   autoLogin: boolean
   panelEnabled: boolean
+  realmEnabled: boolean
   realmInstalled: boolean
   forwardingRules: ForwardRule[]
 }
@@ -121,8 +122,9 @@ export const freshServer = (): Server => ({
   hasSecret: false,
   panelUsername: '',
   hasPanelSecret: false,
-  autoLogin: false,
+  autoLogin: true,
   panelEnabled: true,
+  realmEnabled: false,
   realmInstalled: false,
   forwardingRules: [],
 })
@@ -141,6 +143,8 @@ export function assignPanel(panes: (string | null)[], slot: number, id: string):
 }
 
 export function validateServer(server: Server): string | null {
+  if (!server.realmEnabled && server.forwardingRules.length)
+    return t('停用 realm 管理前请先删除此服务器的转发规则')
   if (!server.name.trim()) return t('请输入服务器名称')
   if (!server.host.trim() || /[\s/\\@]/.test(server.host)) return t('请输入有效的 SSH 主机')
   if (!server.username.trim()) return t('请输入 SSH 用户名')

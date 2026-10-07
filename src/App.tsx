@@ -562,14 +562,24 @@ export default function App() {
                 aria-controls="workspace-navigation"
                 onClick={() => setNavigationOpen((open) => !open)}
               >
-                {t('工作空间')}
+                <strong>
+                  {page === 'forwarding'
+                    ? t('端口转发')
+                    : page === 'workspace'
+                      ? t('面板工作区')
+                      : group === 'all'
+                        ? t('全部服务器')
+                        : group === 'connected'
+                          ? t('已连接')
+                          : group}
+                </strong>
                 <ChevronDown size={13} />
               </button>
               {navigationOpen && (
                 <nav
                   id="workspace-navigation"
                   className="dropdown workspace-dropdown"
-                  aria-label={t('工作空间')}
+                  aria-label={t('快捷切换')}
                 >
                   {[
                     { id: 'all', label: t('全部服务器'), Icon: ServerIcon, target: 'servers' as const },
@@ -610,18 +620,6 @@ export default function App() {
                 </nav>
               )}
             </div>
-            <ChevronRight size={13} />
-            <strong>
-              {page === 'forwarding'
-                ? t('端口转发')
-                : page === 'workspace'
-                  ? t('面板工作区')
-                  : group === 'all'
-                    ? t('全部服务器')
-                    : group === 'connected'
-                      ? t('已连接')
-                      : group}
-            </strong>
           </div>
           <div className="topbar-right">
             {!desktop && <span className="preview-badge">{t('浏览器预览')}</span>}
@@ -685,18 +683,6 @@ export default function App() {
                   <strong>{groups.length.toString().padStart(2, '0')}</strong>
                 </span>
               </div>
-              <button
-                onClick={() => {
-                  setPage('workspace')
-                  setLayout('columns')
-                  setActiveSlot(0)
-                }}
-                className="split-shortcut"
-              >
-                <Columns2 size={21} />
-                <span>{t('并行管理')}</span>
-                <ArrowUpRight size={19} />
-              </button>
             </div>
             <div className="collection-toolbar">
               <div className="filter-tabs">
@@ -858,16 +844,24 @@ export default function App() {
                               <span className="panel-icon">S</span>S-UI <span>:{server.panelPort}</span>
                             </>
                           ) : (
-                            <>{server.realmInstalled ? 'realm' : t('仅 SSH')}</>
+                            <>{server.realmEnabled ? 'realm' : t('仅 SSH')}</>
                           )}
                         </span>
                         <button
                           className={`connect-button ${status === 'connected' ? 'is-connected' : ''}`}
                           disabled={status === 'connecting'}
-                          onClick={() => (server.panelEnabled ? void connect(server) : setPage('forwarding'))}
+                          onClick={() =>
+                            server.panelEnabled
+                              ? void connect(server)
+                              : server.realmEnabled
+                                ? setPage('forwarding')
+                                : edit(server)
+                          }
                         >
                           {!server.panelEnabled
-                            ? t('端口转发')
+                            ? server.realmEnabled
+                              ? t('端口转发')
+                              : t('编辑服务器')
                             : status === 'connected'
                               ? t('打开面板')
                               : status === 'connecting'

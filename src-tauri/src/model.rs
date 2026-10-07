@@ -53,6 +53,8 @@ pub struct Server {
     pub auto_login: bool,
     #[serde(default = "enabled_by_default")]
     pub panel_enabled: bool,
+    #[serde(default = "enabled_by_default")]
+    pub realm_enabled: bool,
     #[serde(default)]
     pub realm_installed: bool,
     #[serde(default)]
@@ -215,6 +217,7 @@ pub(crate) mod tests {
             has_panel_secret: false,
             auto_login: false,
             panel_enabled: true,
+            realm_enabled: true,
             realm_installed: false,
             forwarding_rules: Vec::new(),
         }

@@ -66,6 +66,8 @@ pub async fn run(
             "初始化仅支持 x86_64 和 aarch64 服务器"
         } else if output.lines().any(|s| s == "HUB_SUI_EXISTS") {
             "检测到已有 S-UI 安装，已保留原配置；请直接配置面板连接"
+        } else if output.lines().any(|s| s == "HUB_REALM_EXISTS") {
+            "检测到不完整的 Hub realm 安装，已保留原文件；请检查服务和配置"
         } else if output.lines().any(|s| s == "HUB_BUSY") {
             "另一项远端管理操作正在运行，请稍后重试"
         } else if output.lines().any(|s| s == "HUB_ROLLED_BACK") {

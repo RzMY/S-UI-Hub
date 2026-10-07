@@ -6,7 +6,7 @@ import { getError, validateForwardRule } from './types'
 import type { ForwardRule, Server } from './types'
 
 export default function ForwardingPage({
-  servers,
+  servers: allServers,
   onUpdate,
   runRemote,
   onInitialize,
@@ -16,6 +16,7 @@ export default function ForwardingPage({
   runRemote: (server: Server, action: () => Promise<void>) => Promise<void>
   onInitialize: (server: Server, services: ('sui' | 'realm')[]) => Promise<void>
 }) {
+  const servers = allServers.filter((s) => s.realmEnabled)
   const [filter, setFilter] = useState('')
   const [draft, setDraft] = useState<{ serverId: string; rule: ForwardRule; editing: boolean } | null>(null)
   const [removing, setRemoving] = useState<{ server: Server; rule: ForwardRule } | null>(null)
@@ -58,7 +59,6 @@ export default function ForwardingPage({
             {t('端口转发')}
             <span>{rows.length}</span>
           </h1>
-          <p className="page-description">{t('通过 realm 独立管理 TCP / UDP 转发，无需安装 S-UI。')}</p>
         </div>
         <button
           className="button primary"
@@ -134,11 +134,6 @@ export default function ForwardingPage({
           </>
         )}
       </div>
-      <p className="form-hint">
-        {desktop
-          ? t('入站监听所有 IPv4 地址，同时转发 TCP 和 UDP。请在服务器防火墙及云安全组放行入站端口。')
-          : t('浏览器预览仅保存规则，不安装服务或连接服务器。')}
-      </p>
       {busy && (
         <p role="status" className="operation-notice">
           {t('正在处理，请稍候…')}
@@ -226,9 +221,6 @@ export default function ForwardingPage({
         <div className="state-message">
           <Network size={34} />
           <h2>{t('暂无转发规则')}</h2>
-          <p>
-            {servers.length ? t('选择服务器并初始化 realm，即可新增端口转发规则。') : t('先添加一台服务器')}
-          </p>
         </div>
       )}
       {draft && (

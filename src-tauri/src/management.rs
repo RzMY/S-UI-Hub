@@ -77,7 +77,12 @@ pub async fn initialize_service(
     let mut server = begin(&hub, &id).await?;
     let result = async {
         let (script, input) = match service {
-            Service::Realm => (realm::install_script(), Zeroizing::new(String::new())),
+            Service::Realm => {
+                if !server.realm_enabled {
+                    return Err(HubError::new("realm", "请先启用 realm 端口转发管理"));
+                }
+                (realm::install_script(), Zeroizing::new(String::new()))
+            }
             Service::Sui => {
                 if !server.panel_enabled
                     || server.panel_scheme != "http"
@@ -140,7 +145,7 @@ pub async fn update_forwarding(
     authorize(&webview)?;
     let mut server = begin(&hub, &id).await?;
     let result = async {
-        if !server.realm_installed {
+        if !server.realm_enabled || !server.realm_installed {
             return Err(HubError::new("realm", "请先在此服务器初始化 realm"));
         }
         match change {

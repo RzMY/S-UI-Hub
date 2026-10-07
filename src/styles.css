@@ -9,12 +9,8 @@
   font-size: 13px;
   color-scheme: light;
 }
-.page-description,
-.form-hint {
-  color: #7c9083;
-  font-size: 12px;
-  line-height: 1.8;
-  margin: 10px 0 16px;
+.checkbox-label.service-option {
+  margin-left: 24px;
 }
 .forwarding-toolbar {
   display: flex;
@@ -515,7 +511,7 @@ button:hover {
 }
 .overview-strip {
   display: grid;
-  grid-template-columns: repeat(3, 1fr) 1.15fr;
+  grid-template-columns: repeat(3, 1fr);
   border: 1px solid #e1e8e2;
   background: #fff;
   border-radius: 9px;
@@ -529,6 +525,9 @@ button:hover {
   gap: 15px;
   padding: 0 25px;
   border-right: 1px solid #e9eeea;
+}
+.overview-strip > div:last-child {
+  border-right: 0;
 }
 .overview-icon {
   width: 39px;
@@ -571,29 +570,7 @@ button:hover {
   border-radius: 3px;
   padding: 2px 5px;
 }
-.split-shortcut {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  text-align: left;
-  padding: 0 22px;
-  color: #7d9584;
-}
-.split-shortcut > span {
-  font-size: 12px;
-  color: #577560;
-  flex: 1;
-  white-space: nowrap;
-}
-.split-shortcut small {
-  display: block;
-  font-size: 9px;
-  color: #9aa99e;
-  margin-top: 6px;
-}
-.split-shortcut:hover {
-  color: #2a633f;
-}
+
 .collection-toolbar {
   display: flex;
   align-items: center;
@@ -1662,16 +1639,7 @@ button:hover {
     width: 31px;
     height: 35px;
   }
-  .split-shortcut {
-    padding: 0 14px;
-    gap: 8px;
-  }
-  .split-shortcut > span {
-    font-size: 11px;
-  }
-  .split-shortcut > svg:last-child {
-    display: none;
-  }
+
   .workspace-heading > div:first-child {
     gap: 9px;
   }
@@ -1745,9 +1713,7 @@ button:hover {
 .overview-strip strong {
   font-size: 26px;
 }
-.split-shortcut > span {
-  font-size: 13px;
-}
+
 .filter-tabs > button {
   font-size: 12px;
 }
@@ -1956,7 +1922,6 @@ button:hover {
 [data-theme='dark'] .server-host,
 [data-theme='dark'] .card-meta,
 [data-theme='dark'] .page-heading p,
-[data-theme='dark'] .split-shortcut > span,
 [data-theme='dark'] .preference-label,
 [data-theme='dark'] .form-section,
 [data-theme='dark'] .server-dialog label {

@@ -10,6 +10,7 @@ const previewKey = 's-ui-hub.preview.servers.v1'
 const normalizeServer = (s: Server): Server => ({
   ...s,
   panelEnabled: s.panelEnabled ?? true,
+  realmEnabled: s.realmEnabled ?? true,
   realmInstalled: s.realmInstalled ?? false,
   forwardingRules: s.forwardingRules ?? [],
 })
@@ -51,8 +52,20 @@ export const api = {
     clearSecret,
     panelSecret,
     clearPanelSecret,
+    initializeSui,
+    resetPanel,
   }: SaveServer): Promise<Server> => {
-    if (desktop) return invoke('save_server', { server, secret, clearSecret, panelSecret, clearPanelSecret })
+    if (desktop)
+      return invoke('save_server', {
+        server,
+        secret,
+        clearSecret,
+        panelCredentials: {
+          secret: panelSecret,
+          clear: clearPanelSecret,
+          action: resetPanel ? 'reset' : initializeSui ? 'initialize' : null,
+        },
+      })
     // Browser preview never stores credentials, including encrypted key passphrases.
     const saved = { ...server, hasSecret: false, hasPanelSecret: false, hostFingerprint: null }
     const servers = previewServers().filter((s) => s.id !== server.id)

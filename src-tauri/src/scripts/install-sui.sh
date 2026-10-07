@@ -1,8 +1,11 @@
+# Check installation artifacts before reading credentials or changing packages.
+for hub_existing in /usr/local/s-ui /usr/bin/s-ui /usr/local/bin/s-ui /etc/init.d/s-ui /etc/systemd/system/s-ui.service /usr/lib/systemd/system/s-ui.service /lib/systemd/system/s-ui.service; do
+    if [ -e "$hub_existing" ] || [ -L "$hub_existing" ]; then fail HUB_SUI_EXISTS; fi
+done
 IFS= read -r hub_port
 IFS= read -r hub_path
 IFS= read -r hub_user
 IFS= read -r hub_pass
-[ ! -e /usr/local/s-ui ] || fail HUB_SUI_EXISTS
 case "$(uname -m)" in
     x86_64|amd64) hub_arch=amd64; hub_sha=f33bf45ec222bd67207cbe294b968c99a95ae92c8db989c59b49262558b003dd ;;
     aarch64|arm64) hub_arch=arm64; hub_sha=399c6d551b43878b95b53187d75951109ad95e68d28292a343668cdfe7f8a784 ;;
