@@ -46,7 +46,8 @@ type Confirm = {
   action: string
   danger?: boolean
   fingerprint?: string
-  run: () => Promise<void>
+  forceDelete?: boolean
+  run: (forceDelete?: boolean) => Promise<void>
 }
 
 export default function App() {
@@ -390,12 +391,18 @@ export default function App() {
     setMenu(null)
     setConfirm({
       title: t('删除「{0}」？', server.name),
-      message: t('服务器配置和已保存的 SSH 凭证将被移除。'),
+      message: server.forwardingRules.length
+        ? t(
+            '此服务器有 {0} 条转发规则。请先删除规则；服务器失联时可勾选强制删除。',
+            server.forwardingRules.length,
+          )
+        : t('服务器配置和已保存的 SSH / 面板凭证将被移除。'),
       action: t('删除服务器'),
       danger: true,
-      run: async () => {
+      forceDelete: server.forwardingRules.length ? false : undefined,
+      run: async (forceDelete = false) => {
         await disconnect(server.id)
-        await api.deleteServer(server.id)
+        await api.deleteServer(server.id, forceDelete)
         setServers((s) => s.filter((item) => item.id !== server.id))
         setPanes((p) => p.map((id) => (id === server.id ? null : id)))
         setConfirm(null)
@@ -1107,6 +1114,25 @@ export default function App() {
             <h2 id="confirm-title">{confirm.title}</h2>
             <p>{confirm.message}</p>
             {confirm.fingerprint && <code className="fingerprint">{confirm.fingerprint}</code>}
+            {confirm.forceDelete !== undefined && (
+              <div className="force-delete-option">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={confirm.forceDelete}
+                    disabled={confirmBusy}
+                    aria-describedby="force-delete-description"
+                    onChange={(event) => setConfirm({ ...confirm, forceDelete: event.target.checked })}
+                  />
+                  {t('强制删除服务器')}
+                </label>
+                <p id="force-delete-description">
+                  {t(
+                    '仅移除本地配置、转发规则记录和已保存的 SSH / 面板凭证，不连接远端。远端规则可能继续运行，需自行清理。',
+                  )}
+                </p>
+              </div>
+            )}
             <footer className="dialog-footer">
               <button
                 autoFocus
@@ -1118,16 +1144,16 @@ export default function App() {
               </button>
               <button
                 className={`button ${confirm.danger ? 'danger' : 'primary'}`}
-                disabled={confirmBusy}
+                disabled={confirmBusy || confirm.forceDelete === false}
                 onClick={() => {
                   setConfirmBusy(true)
                   void confirm
-                    .run()
+                    .run(confirm.forceDelete)
                     .catch(report)
                     .finally(() => setConfirmBusy(false))
                 }}
               >
-                {confirmBusy ? t('处理中…') : confirm.action}
+                {confirmBusy ? t('处理中…') : confirm.forceDelete ? t('强制删除服务器') : confirm.action}
               </button>
             </footer>
           </section>

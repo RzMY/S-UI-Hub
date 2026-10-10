@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod deletion_tests;
 mod management;
 mod model;
 mod panel;
@@ -172,31 +174,40 @@ async fn save_server(
     Ok(server)
 }
 
-#[tauri::command]
-async fn delete_server(webview: Webview, hub: State<'_, Hub>, id: String) -> Result<()> {
-    authorize(&webview)?;
-    let mut inner = hub.inner.lock().await;
-    writable(&inner)?;
-    idle(&inner, &id)?;
-    if !inner.servers.iter().any(|s| s.id == id) {
-        return Err(HubError::new("missing", "服务器不存在"));
-    }
-    if inner
+fn servers_after_deletion(inner: &Inner, id: &str, force: bool) -> Result<Vec<Server>> {
+    writable(inner)?;
+    idle(inner, id)?;
+    let server = inner
         .servers
         .iter()
-        .any(|s| s.id == id && !s.forwarding_rules.is_empty())
-    {
+        .find(|s| s.id == id)
+        .ok_or_else(|| HubError::new("missing", "服务器不存在"))?;
+    if !force && !server.forwarding_rules.is_empty() {
         return Err(HubError::new(
             "realm",
             "请先在端口转发模块删除此服务器的规则，再删除服务器",
         ));
     }
-    let next: Vec<_> = inner
+    Ok(inner
         .servers
         .iter()
         .filter(|s| s.id != id)
         .cloned()
-        .collect();
+        .collect())
+}
+
+#[tauri::command]
+async fn delete_server(
+    webview: Webview,
+    hub: State<'_, Hub>,
+    id: String,
+    force: Option<bool>,
+) -> Result<()> {
+    authorize(&webview)?;
+    let mut inner = hub.inner.lock().await;
+    // Force deletion only skips the forwarding-rule guard; it never contacts SSH
+    // or bypasses the storage and in-flight operation protections.
+    let next = servers_after_deletion(&inner, &id, force.unwrap_or(false))?;
     let panel_key = format!("panel:{id}");
     store::commit(&hub.path, &next, &[(&id, None), (&panel_key, None)])?;
     inner.servers = next;

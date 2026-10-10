@@ -72,9 +72,9 @@ export const api = {
     localStorage.setItem(previewKey, JSON.stringify([...servers, saved]))
     return saved
   },
-  deleteServer: async (id: string): Promise<void> => {
-    if (desktop) return invoke('delete_server', { id })
-    if (previewServers().find((s) => s.id === id)?.forwardingRules.length)
+  deleteServer: async (id: string, force = false): Promise<void> => {
+    if (desktop) return invoke('delete_server', { id, force })
+    if (!force && previewServers().find((s) => s.id === id)?.forwardingRules.length)
       throw new Error(t('请先在端口转发模块删除此服务器的规则，再删除服务器'))
     localStorage.setItem(previewKey, JSON.stringify(previewServers().filter((s) => s.id !== id)))
   },

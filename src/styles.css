@@ -1504,6 +1504,24 @@ button:hover {
   color: #93a296;
   margin: 13px 0 20px;
 }
+.force-delete-option .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.force-delete-option input {
+  flex-shrink: 0;
+}
+.force-delete-option p {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.9;
+  color: #a36557;
+}
+[data-theme='dark'] .force-delete-option p {
+  color: #dda89b;
+}
 .fingerprint {
   display: block;
   font-size: 12px;
